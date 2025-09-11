@@ -1,53 +1,29 @@
-name: Create VPS (TEST 15m - preserves original flow)
+name: Create VPS (Auto-Restart & Safe)
 
 on:
   workflow_dispatch:
   repository_dispatch:
     types: [create-vps]
 
-# allow workflow to push small files (last_backup_url.txt)
-permissions:
-  contents: write
-
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 16   # 15m + small buffer for final upload
+    timeout-minutes: 15
     env:
       TMATE_SERVER: nyc1.tmate.io
 
     steps:
-      - name: ⬇️ Checkout (keep .git for pushes)
+      - name: ⬇️ Checkout
         uses: actions/checkout@v3
-        with:
-          persist-credentials: true
-
-      - name: 🔧 Configure git for authenticated pushes
-        run: |
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          # ensure remote uses token (persist-credentials usually does this already)
-          git remote set-url origin https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git || true
 
       - name: 📁 Prepare dirs
-        run: mkdir -p links .backup backup_meta
+        run: mkdir -p links .backup
 
-      - name: 💾 Restore backup (from transfer.sh link)   # same behavior you had
-        run: |
-          if [ -f last_backup_url.txt ]; then
-            url=$(cat last_backup_url.txt)
-            echo "🔄 Downloading backup from $url"
-            curl -s --fail "$url" -o vps_backup.tar.gz || { echo "⚠️ Failed to download backup (continuing)"; }
-            if [ -f vps_backup.tar.gz ]; then
-              echo "🔧 Extracting backup to / (requires sudo)..."
-              sudo tar -xzf vps_backup.tar.gz -C / || echo "⚠️ Failed to extract backup (continuing)"
-              echo "✅ Backup restore attempt finished."
-            else
-              echo "⚠️ No archive file to extract."
-            fi
-          else
-            echo "⚠️ No backup link found, starting fresh"
-          fi
+      - name: 🛠️ Make backup script executable
+        run: chmod +x backup-restore.sh
+
+      - name: 💾 Restore backup (from transfer.sh link)
+        run: ./backup-restore.sh restore_backup
 
       - name: 🔐 Start tmate session
         run: |
@@ -64,78 +40,37 @@ jobs:
           nohup ./playit > playit.log 2>&1 &
           echo "✅ Playit started."
 
-      - name: ⏳ Keep VPS alive (12m loop; failsafe at minute 10)
+      - name: ⏳ Keep VPS alive (15 min test loop)
         run: |
           i=1
-          while [ $i -le 12 ]; do
-            echo "🟢 Running minute $i/12..."
-            # Failsafe at minute 10 (best-effort)
-            if [ $i -eq 10 ]; then
-              echo "⚠️ Minute $i: creating failsafe backup (best-effort)"
-              mkdir -p backup_meta
-              # Save installed packages list (so you can reinstall if needed)
-              dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
-              # create a smaller failsafe archive of essential dirs
-              sudo tar czf vps_failsafe.tar.gz /etc /var /usr/local /opt /home backup_meta \
-                --exclude=/var/cache/apt/archives --exclude=/var/tmp --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/tmp || true
-              # upload failsafe
-              url=$(curl -s --upload-file ./vps_failsafe.tar.gz https://transfer.sh/vps_failsafe.tar.gz || echo "")
-              if [ -n "$url" ]; then
-                echo "🆙 Failsafe uploaded: $url"
-                echo "$url" > last_backup_url.txt
-                git add last_backup_url.txt || true
-                git commit -m "Failsafe backup URL (test)" || true
-                git push origin HEAD:main || true
-              else
-                echo "⚠️ Failsafe upload failed"
-              fi
-            fi
-
+          while [ $i -le 15 ]; do
+            echo "🟢 Running minute $i/15..."
             sleep 60 || break
             i=$((i+1))
           done
-          echo "🔔 Keep-alive loop ended at minute $i"
 
-      - name: 📦 Final backup before timeout (test)
+      - name: 📦 Final backup before timeout
         if: always()
-        run: |
-          echo "Creating test FINAL backup (only essential dirs, so it completes fast)..."
-          mkdir -p backup_meta
-          dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
-          # Archive essential system & user dirs (smaller than full /)
-          sudo tar czf vps_backup.tar.gz /etc /var /usr/local /opt /home backup_meta \
-            --exclude=/var/cache/apt/archives --exclude=/var/tmp --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run --exclude=/tmp || true
-
-          echo "Uploading final backup to transfer.sh..."
-          url=$(curl -s --upload-file ./vps_backup.tar.gz https://transfer.sh/vps_backup.tar.gz || echo "")
-          if [ -n "$url" ]; then
-            echo "🆙 Final backup uploaded: $url"
-            echo "$url" > last_backup_url.txt
-          else
-            echo "⚠️ Final upload failed"
-          fi
+        run: ./backup-restore.sh backup_and_upload
 
       - name: 🔄 Pull latest changes (avoid push rejection)
-        if: always()
         run: |
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
           git pull --rebase origin main || true
 
-      - name: 📤 Save SSH link + backup URL (commit small files only)
-        if: always()
+      - name: 📤 Save SSH link + backup URL
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🔁 Updated SSH + backup URL (test)"
+          commit_message: "🔁 Updated SSH + backup URL"
           file_pattern: 'links/*.txt last_backup_url.txt'
-          push_options: '--force'
 
-      - name: 🔁 Restart workflow automatically (test)
+      - name: 🔁 Restart workflow automatically
         if: always()
         run: |
-          echo "🔄 Triggering repository_dispatch to restart test VPS..."
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             https://api.github.com/repos/${{ github.repository }}/dispatches \
-            -d '{"event_type":"create-vps","client_payload":{"vps_name":"manual-vps","backup":true}}'
-
+            -d '{"event_type": "create-vps", "client_payload": {"vps_name": "manual-vps", "backup": true}}'
