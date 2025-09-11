@@ -8,7 +8,7 @@ on:
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 35
     env:
       TMATE_SERVER: nyc1.tmate.io
 
@@ -41,38 +41,44 @@ jobs:
           nohup ./playit > playit.log 2>&1 &
           echo "✅ Playit started."
 
-      - name: ⏳ Keep VPS alive (14 min safe period)
+      - name: ⏳ Keep VPS alive (10 min safe period)
         run: |
           i=1
-          while [ $i -le 14 ]; do
-            echo "🟢 Running minute $i/14..."
+          while [ $i -le 10 ]; do
+            echo "🟢 Running minute $i/10..."
             sleep 60
             i=$((i+1))
           done
 
-      - name: 📦 Final backup before timeout
+      - name: 📦 Full backup with 20min timeout
+        continue-on-error: true
+        timeout-minutes: 20
         run: |
-          echo "Starting backup process..."
-          ./backup-restore.sh backup_and_upload
-          echo "Backup completed successfully"
+          echo "🚀 Starting FULL backup process (20 minutes max)..."
+          ./backup-restore.sh backup_and_upload || echo "Backup script failed - continuing"
+          echo "Backup attempt completed"
 
       - name: 🔄 Pull latest changes
+        continue-on-error: true
         run: |
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          git pull --rebase origin main
+          git pull --rebase origin main || echo "Pull failed - continuing"
 
       - name: 📤 Save SSH link + backup URL
+        continue-on-error: true
         run: |
-          git add links/*.txt last_backup_url.txt
-          git commit -m "🔁 Updated SSH + backup URL"
-          git push origin main
+          git add links/*.txt last_backup_url.txt || echo "No files to add"
+          git commit -m "🔁 Updated SSH + backup URL" || echo "Nothing to commit"
+          git push origin main || echo "Push failed - continuing"
 
       - name: 🔁 Restart workflow automatically
+        continue-on-error: true
         run: |
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
             -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
             -H "Content-Type: application/json" \
             https://api.github.com/repos/${{ github.repository }}/dispatches \
-            -d '{"event_type": "create-vps", "client_payload": {"vps_name": "manual-vps", "backup": true}}'
+            -d '{"event_type": "create-vps", "client_payload": {"vps_name": "manual-vps", "backup": true}}' \
+          || echo "Restart request failed"
