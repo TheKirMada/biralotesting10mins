@@ -24,6 +24,7 @@ jobs:
 
       - name: 💾 Restore backup (from transfer.sh link)
         run: ./backup-restore.sh restore_backup
+         continue-on-error: true
 
       - name: 🔐 Start tmate session
         run: |
