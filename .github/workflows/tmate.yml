@@ -8,7 +8,7 @@ on:
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     env:
       TMATE_SERVER: nyc1.tmate.io
 
@@ -23,7 +23,7 @@ jobs:
         run: chmod +x backup-restore.sh
 
       - name: 💾 Restore backup (from transfer.sh link)
-        continue-on-error: true  # <- ONLY ADDITION: Allows workflow to continue if no backup exists
+        continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
       - name: 🔐 Start tmate session
@@ -41,33 +41,36 @@ jobs:
           nohup ./playit > playit.log 2>&1 &
           echo "✅ Playit started."
 
-      - name: ⏳ Keep VPS alive (15 min test loop)
+      - name: ⏳ Keep VPS alive (15 min safe period)
+        timeout-minutes: 15
         run: |
           i=1
           while [ $i -le 15 ]; do
             echo "🟢 Running minute $i/15..."
-            sleep 60 || break
+            sleep 60
             i=$((i+1))
           done
 
       - name: 📦 Final backup before timeout
-        if: always()
-        run: ./backup-restore.sh backup_and_upload
+        timeout-minutes: 15
+        run: |
+          echo "Starting backup process..."
+          ./backup-restore.sh backup_and_upload
+          echo "Backup completed successfully"
 
-      - name: 🔄 Pull latest changes (avoid push rejection)
+      - name: 🔄 Pull latest changes
         run: |
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          git pull --rebase origin main || true
+          git pull --rebase origin main
 
       - name: 📤 Save SSH link + backup URL
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "🔁 Updated SSH + backup URL"
-          file_pattern: 'links/*.txt last_backup_url.txt'
+        run: |
+          git add links/*.txt last_backup_url.txt
+          git commit -m "🔁 Updated SSH + backup URL"
+          git push origin main
 
       - name: 🔁 Restart workflow automatically
-        if: always()
         run: |
           curl -X POST \
             -H "Accept: application/vnd.github+json" \
