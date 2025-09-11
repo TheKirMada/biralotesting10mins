@@ -24,7 +24,6 @@ jobs:
 
       - name: 💾 Restore backup (from transfer.sh link)
         run: ./backup-restore.sh restore_backup
-         continue-on-error: true
 
       - name: 🔐 Start tmate session
         run: |
@@ -53,7 +52,6 @@ jobs:
       - name: 📦 Final backup before timeout
         if: always()
         run: ./backup-restore.sh backup_and_upload
-         continue-on-error: true
 
       - name: 🔄 Pull latest changes (avoid push rejection)
         run: |
