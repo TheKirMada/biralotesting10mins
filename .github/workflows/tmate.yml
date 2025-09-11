@@ -8,7 +8,7 @@ on:
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     env:
       TMATE_SERVER: nyc1.tmate.io
 
@@ -41,18 +41,16 @@ jobs:
           nohup ./playit > playit.log 2>&1 &
           echo "✅ Playit started."
 
-      - name: ⏳ Keep VPS alive (15 min safe period)
-        timeout-minutes: 15
+      - name: ⏳ Keep VPS alive (14 min safe period)
         run: |
           i=1
-          while [ $i -le 15 ]; do
-            echo "🟢 Running minute $i/15..."
+          while [ $i -le 14 ]; do
+            echo "🟢 Running minute $i/14..."
             sleep 60
             i=$((i+1))
           done
 
       - name: 📦 Final backup before timeout
-        timeout-minutes: 15
         run: |
           echo "Starting backup process..."
           ./backup-restore.sh backup_and_upload
