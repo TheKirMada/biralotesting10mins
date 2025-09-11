@@ -1,4 +1,4 @@
-name: Create VPS (Test Mode - 15min + Failsafe)
+name: Test VPS (15m with Full Backup + Failsafe)
 
 on:
   workflow_dispatch:
@@ -8,7 +8,9 @@ on:
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 16  # 15m loop + buffer
+    timeout-minutes: 15
+    env:
+      TMATE_SERVER: nyc1.tmate.io
 
     steps:
       - name: ⬇️ Checkout
@@ -17,13 +19,13 @@ jobs:
       - name: 📁 Prepare dirs
         run: mkdir -p links .backup
 
-      - name: 💾 Restore backup (from transfer.sh link)
+      - name: 💾 Restore full backup
         run: |
           if [ -f last_backup_url.txt ]; then
             url=$(cat last_backup_url.txt)
             echo "Downloading backup from $url"
             curl -s --fail "$url" -o vps_backup.tar.gz || echo "⚠️ Failed to download backup"
-            tar -xzf vps_backup.tar.gz || echo "⚠️ Failed to extract backup"
+            sudo tar -xzf vps_backup.tar.gz -C / || echo "⚠️ Failed to extract backup"
           else
             echo "⚠️ No backup link found, starting fresh"
           fi
@@ -43,49 +45,37 @@ jobs:
           nohup ./playit > playit.log 2>&1 &
           echo "✅ Playit started."
 
-      - name: ⏳ Keep VPS alive (15m loop + failsafe)
+      - name: ⏳ Keep VPS alive (15m loop)
         run: |
           i=1
           while [ $i -le 15 ]; do
             echo "🟢 Running minute $i/15..."
-
-            # Run failsafe backup at minute 12 (3m before timeout)
-            if [ $i -eq 12 ]; then
-              echo "⚠️ Running failsafe backup at minute 12..."
-              tar czf vps_failsafe_backup.tar.gz ./data ./scripts ./configs 2>/dev/null || tar czf vps_failsafe_backup.tar.gz . 
-              url=$(curl --upload-file vps_failsafe_backup.tar.gz https://transfer.sh/vps_failsafe_backup.tar.gz)
-              echo "🆙 Failsafe backup uploaded: $url"
-              echo $url > last_backup_url.txt
-              git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-              git config --global user.name "github-actions[bot]"
-              git add last_backup_url.txt || true
-              git commit -m "💾 Failsafe backup (test)" || true
-              git push || true
-            fi
-
-            command sleep 60 || break
+            sleep 60 || break
             i=$((i+1))
           done
 
       - name: 📦 Final backup before timeout
+        if: always()
         run: |
-          echo "Creating backup archive..."
-          tar czf vps_backup.tar.gz ./data ./scripts ./configs 2>/dev/null || tar czf vps_backup.tar.gz . 
+          echo "Creating FULL backup archive..."
+          sudo tar czf vps_backup.tar.gz --exclude=/proc --exclude=/sys --exclude=/dev --exclude=/run /
           echo "Uploading to transfer.sh..."
           url=$(curl --upload-file vps_backup.tar.gz https://transfer.sh/vps_backup.tar.gz)
           echo "🆙 Backup uploaded: $url"
           echo $url > last_backup_url.txt
 
       - name: 🔄 Pull latest changes (avoid push rejection)
+        if: always()
         run: |
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           git pull --rebase origin main || true
 
       - name: 📤 Save SSH link + backup URL
+        if: always()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: "🔁 Updated SSH + backup URL (Test)"
+          commit_message: "🔁 Updated SSH + backup URL"
           file_pattern: 'links/*.txt last_backup_url.txt'
 
       - name: 🔁 Restart workflow automatically
