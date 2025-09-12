@@ -26,12 +26,6 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
-      - name: 🔧 Update system
-        run: |
-          echo "🚀 Updating system..."
-          apt update
-          echo "✅ System updated"
-
       - name: 🔧 Install PufferPanel
         run: |
           echo "🚀 Installing PufferPanel..."
@@ -56,11 +50,15 @@ jobs:
 
       - name: 🔐 Start tmate session
         run: |
-          apt update -y && apt install -y tmate
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-          echo "$SSH" | tee "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
+          # Download and install tmate manually (no apt)
+          wget -q https://github.com/tmate-io/tmate/releases/download/2.4.0/tmate-2.4.0-static-linux-amd64.tar.xz
+          tar -xf tmate-2.4.0-static-linux-amd64.tar.xz
+          cd tmate-2.4.0-static-linux-amd64
+          ./tmate -S /tmp/tmate.sock new-session -d
+          ./tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(./tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" | tee "../links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
+          cd ..
 
       - name: 🚀 Start Playit Tunnel
         run: |
@@ -83,9 +81,9 @@ jobs:
         run: |
           echo "🚀 Creating COMPLETE PufferPanel + ngrok backup..."
           
-          # Save package list (includes ngrok and all dependencies)
+          # Save package list (if possible)
           mkdir -p backup_meta
-          dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
+          command -v dpkg >/dev/null 2>&1 && dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
           
           # Build list of directories that ACTUALLY exist
           BACKUP_DIRS="backup_meta"
