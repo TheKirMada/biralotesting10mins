@@ -46,16 +46,20 @@ jobs:
           
           # Wait for PufferPanel to start
           echo "⏳ Waiting for PufferPanel to start..."
-          sleep 20
+          sleep 30
           
-          # Create admin user using direct SQL insert (since pufferpanel CLI doesn't work)
+          # Create admin user using HTTP API (since CLI and SQL don't work)
           echo "👤 Creating admin user: thekirmada"
-          docker exec pufferpanel sqlite3 /etc/pufferpanel/database.db "
-            INSERT INTO users (username, password, email, role_id, activated) 
-            VALUES ('thekirmada', '\$2a\$10\$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'xblankx79@gmail.com', 1, 1);
-          "
+          curl -X POST http://localhost:8080/api/auth/register \
+            -H "Content-Type: application/json" \
+            -d '{
+              "username": "thekirmada",
+              "password": "thekirmada2009",
+              "email": "xblankx79@gmail.com",
+              "admin": true
+            }' || echo "User creation attempted (may fail if panel not fully ready)"
           
-          echo "✅ PufferPanel running with admin user: thekirmada (password: thekirmada2009)"
+          echo "✅ PufferPanel running on port 8080. Login with thekirmada/thekirmada2009"
 
       - name: 🔧 Install and Setup ngrok
         run: |
