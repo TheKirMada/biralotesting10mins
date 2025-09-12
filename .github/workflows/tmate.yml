@@ -26,39 +26,9 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
-      - name: 🔧 Create PufferPanel setup script
+      - name: 🔧 Install PufferPanel with Pre-configured Admin
         run: |
-          echo "📝 Creating PufferPanel setup script..."
-          cat > puffer_setup.sh << 'EOF'
-          #!/bin/bash
-          # Wait for PufferPanel to be ready
-          echo "⏳ Waiting for PufferPanel to start..."
-          sleep 30
-          
-          # Try multiple methods to create user
-          echo "👤 Attempting to create admin user..."
-          
-          # Method 1: Try API registration
-          if curl -X POST http://localhost:8080/api/auth/register \
-            -H "Content-Type: application/json" \
-            -d '{"username":"thekirmada","password":"thekirmada2009","email":"xblankx79@gmail.com","admin":true}' > /dev/null 2>&1; then
-            echo "✅ User created via API"
-          else
-            echo "❌ API method failed, trying alternative methods..."
-            # Method 2: Manual setup instructions
-            echo "📋 Manual setup required:"
-            echo "1. Open PufferPanel at the ngrok URL"
-            echo "2. Create admin account manually with:"
-            echo "   Username: thekirmada"
-            echo "   Password: thekirmada2009"
-            echo "   Email: xblankx79@gmail.com"
-          fi
-          EOF
-          chmod +x puffer_setup.sh
-
-      - name: 🔧 Install PufferPanel (Docker Method)
-        run: |
-          echo "🚀 Installing PufferPanel using Docker..."
+          echo "🚀 Installing PufferPanel with pre-configured admin account..."
           # Install Docker without sudo using official script
           curl -fsSL https://get.docker.com -o get-docker.sh
           sh get-docker.sh
@@ -66,17 +36,18 @@ jobs:
           # Create PufferPanel data directory
           mkdir -p /home/runner/pufferpanel/data
           
-          # Run PufferPanel in Docker (no system installation needed)
+          # Run PufferPanel with ADMIN credentials pre-set via environment variables
           docker run -d \
             -p 8080:8080 \
             -v /home/runner/pufferpanel/data:/etc/pufferpanel \
             -v /home/runner/pufferpanel/servers:/var/lib/pufferpanel \
+            -e PUFFERPANEL_DEFAULT_USER="thekirmada" \
+            -e PUFFERPANEL_DEFAULT_PASSWORD="thekirmada2009" \
+            -e PUFFERPANEL_DEFAULT_EMAIL="xblankx79@gmail.com" \
             --name pufferpanel \
             pufferpanel/pufferpanel:latest
           
-          # Run setup script in background
-          nohup ./puffer_setup.sh > puffer_setup.log 2>&1 &
-          echo "✅ PufferPanel running on port 8080. Setup script started."
+          echo "✅ PufferPanel running with pre-configured admin account"
 
       - name: 🔧 Install and Setup ngrok
         run: |
@@ -93,17 +64,21 @@ jobs:
           nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
           
           # Wait for ngrok to start and get the public URL
-          sleep 10
+          sleep 15
           echo "🌐 Ngrok Public URL:"
           NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
           if [ -n "$NGROK_URL" ]; then
             echo "✅ Public URL: $NGROK_URL"
             echo "$NGROK_URL" > ngrok_url.txt
-            echo "📋 Login Credentials:"
+            echo ""
+            echo "🎯 PufferPanel Admin Access:"
+            echo "============================"
             echo "URL: $NGROK_URL"
             echo "Username: thekirmada"
             echo "Password: thekirmada2009"
             echo "Email: xblankx79@gmail.com"
+            echo "============================"
+            echo "This account has FULL ADMIN privileges"
           else
             echo "❌ Could not retrieve ngrok URL. Check ngrok.log for details:"
             cat ngrok.log || echo "No ngrok log available"
