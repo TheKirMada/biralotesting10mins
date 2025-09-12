@@ -26,6 +26,15 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
+      - name: 🔧 Setup System & Gain Root
+        run: |
+          echo "🚀 Setting up system and gaining root access..."
+          sudo su
+          apt update -y
+          apt upgrade -y
+          apt install -y sudo curl
+          echo "✅ System updated and sudo installed"
+
       - name: 🔧 Install PufferPanel
         run: |
           echo "🚀 Installing PufferPanel..."
@@ -37,9 +46,6 @@ jobs:
       - name: 🔧 Install and Setup ngrok
         run: |
           echo "🚀 Installing ngrok..."
-          # Install sudo first (if not already installed)
-          apt install -y sudo
-          
           # Install ngrok
           curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
             | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null \
