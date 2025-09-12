@@ -8,7 +8,7 @@ on:
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 35
     env:
       TMATE_SERVER: nyc1.tmate.io
 
@@ -50,22 +50,23 @@ jobs:
             i=$((i+1))
           done
 
-      - name: 📦 Create ULTRA-FAST backup
-        timeout-minutes: 5
+      - name: 📦 Create PufferPanel & Packages ONLY backup
+        timeout-minutes: 15
         run: |
-          echo "🚀 Creating ULTRA-FAST backup..."
+          echo "🚀 Creating PufferPanel & Packages ONLY backup..."
+          
           # Save package list
           mkdir -p backup_meta
           dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
           
-          # Create minimal backup - include pufferpanel even if not installed
-          sudo tar -czf vps_backup.tar.gz \
-            --exclude='*/cache/*' \
-            --exclude='*/tmp/*' \
-            --exclude='*/log/*' \
-            --exclude='*.log' \
-            --exclude='*.tmp' \
-            /etc/ /home/ /usr/local/bin/ /opt/ /var/lib/pufferpanel/ backup_meta/ 2>/dev/null || true
+          # Create backup - ONLY package list and pufferpanel (if exists)
+          if [ -d "/var/lib/pufferpanel" ]; then
+            echo "📦 Backing up PufferPanel data..."
+            sudo tar -czf vps_backup.tar.gz /var/lib/pufferpanel/ backup_meta/ 2>/dev/null || true
+          else
+            echo "📦 PufferPanel not found, backing up packages only..."
+            tar -czf vps_backup.tar.gz backup_meta/ 2>/dev/null || true
+          fi
           
           echo "✅ Backup created successfully (size: $(du -h vps_backup.tar.gz | cut -f1))"
 
