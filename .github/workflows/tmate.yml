@@ -44,7 +44,17 @@ jobs:
             --name pufferpanel \
             pufferpanel/pufferpanel:latest
           
-          echo "✅ PufferPanel running in Docker on port 8080"
+          # Wait for PufferPanel to start
+          sleep 15
+          
+          # Create admin user using PufferPanel CLI inside the container
+          docker exec pufferpanel pufferpanel user add \
+            --username thekirmada \
+            --password thekirmada2009 \
+            --email xblankx79@gmail.com \
+            --admin
+          
+          echo "✅ PufferPanel running with admin user: thekirmada"
 
       - name: 🔧 Install and Setup ngrok
         run: |
@@ -74,15 +84,11 @@ jobs:
 
       - name: 🔐 Start tmate session
         run: |
-          # Download and install tmate manually (no apt)
-          wget -q https://github.com/tmate-io/tmate/releases/download/2.4.0/tmate-2.4.0-static-linux-amd64.tar.xz
-          tar -xf tmate-2.4.0-static-linux-amd64.tar.xz
-          cd tmate-2.4.0-static-linux-amd64
-          ./tmate -S /tmp/tmate.sock new-session -d
-          ./tmate -S /tmp/tmate.sock wait tmate-ready
-          SSH=$(./tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-          echo "$SSH" | tee "../links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
-          cd ..
+          sudo apt update -y && sudo apt install -y tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" | tee "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
 
       - name: 🚀 Start Playit Tunnel
         run: |
@@ -121,7 +127,7 @@ jobs:
           
           # Create backup of only existing files
           if [ "$BACKUP_DIRS" != "backup_meta" ]; then
-            tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
+            sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
           else
             echo "⚠️ No PufferPanel/ngrok files found, creating package list only"
             tar -czf vps_backup.tar.gz backup_meta/ 2>/dev/null || true
