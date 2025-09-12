@@ -45,16 +45,17 @@ jobs:
             pufferpanel/pufferpanel:latest
           
           # Wait for PufferPanel to start
-          sleep 15
+          echo "⏳ Waiting for PufferPanel to start..."
+          sleep 20
           
-          # Create admin user using PufferPanel CLI inside the container
-          docker exec pufferpanel pufferpanel user add \
-            --username thekirmada \
-            --password thekirmada2009 \
-            --email xblankx79@gmail.com \
-            --admin
+          # Create admin user using direct SQL insert (since pufferpanel CLI doesn't work)
+          echo "👤 Creating admin user: thekirmada"
+          docker exec pufferpanel sqlite3 /etc/pufferpanel/database.db "
+            INSERT INTO users (username, password, email, role_id, activated) 
+            VALUES ('thekirmada', '\$2a\$10\$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'xblankx79@gmail.com', 1, 1);
+          "
           
-          echo "✅ PufferPanel running with admin user: thekirmada"
+          echo "✅ PufferPanel running with admin user: thekirmada (password: thekirmada2009)"
 
       - name: 🔧 Install and Setup ngrok
         run: |
