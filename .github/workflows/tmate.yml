@@ -1,1 +1,127 @@
+name: Create VPS (Auto-Restart & Safe)
 
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [create-vps]
+
+jobs:
+  start-vps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TMATE_SERVER: nyc1.tmate.io
+
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v3
+
+      - name: 📁 Prepare dirs
+        run: mkdir -p links .backup
+
+      - name: 🛠️ Make backup script executable
+        run: chmod +x backup-restore.sh
+
+      - name: 💾 Restore backup (from transfer.sh link)
+        continue-on-error: true
+        run: ./backup-restore.sh restore_backup
+
+      - name: 🔐 Start tmate session
+        run: |
+          sudo apt update -y && sudo apt install -y tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" | tee "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
+
+      - name: 🚀 Start Playit Tunnel
+        run: |
+          wget -q https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-linux-amd64 -O playit
+          chmod +x playit
+          nohup ./playit > playit.log 2>&1 &
+          echo "✅ Playit started."
+
+      - name: ⏳ Keep VPS alive (15 min safe period)
+        run: |
+          i=1
+          while [ $i -le 15 ]; do
+            echo "🟢 Running minute $i/15..."
+            sleep 60
+            i=$((i+1))
+          done
+
+      - name: 📦 COMPLETE PufferPanel + ngrok backup
+        timeout-minutes: 15
+        run: |
+          echo "🚀 Creating COMPLETE PufferPanel + ngrok backup..."
+          
+          # Save package list (includes ngrok and all dependencies)
+          mkdir -p backup_meta
+          dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
+          
+          # Save ALL files created by your commands
+          sudo tar -czf vps_backup.tar.gz \
+            /var/lib/pufferpanel/ \          # PufferPanel data directory
+            /etc/pufferpanel/ \              # PufferPanel config files
+            /etc/apt/sources.list.d/ngrok.list \  # ngrok repository config
+            /etc/apt/trusted.gpg.d/ngrok.asc \    # ngrok GPG key
+            /root/.ngrok2/ \                 # ngrok config directory (contains authtoken)
+            /root/main.sh \                  # Your installation script
+            /home/*/.ngrok2/ \               # ngrok config for all users
+            /usr/bin/ngrok \                 # ngrok binary
+            backup_meta/ 2>/dev/null || true
+          
+          # If backup is empty, create minimal package backup
+          if [ ! -s vps_backup.tar.gz ]; then
+            echo "Creating minimal package backup..."
+            tar -czf vps_backup.tar.gz backup_meta/ 2>/dev/null || true
+          fi
+          
+          echo "✅ COMPLETE backup created (size: $(du -h vps_backup.tar.gz | cut -f1))"
+
+      - name: 📤 Upload backup to transfer.sh
+        continue-on-error: true
+        run: |
+          echo "⬆️ Uploading backup..."
+          # Check if backup file exists and is not empty
+          if [ -s "vps_backup.tar.gz" ]; then
+            UPLOAD_LINK=$(curl --silent --show-error --max-time 300 --retry 2 --upload-file vps_backup.tar.gz https://transfer.sh/vps_backup.tar.gz) || UPLOAD_LINK=""
+            
+            if [ -n "$UPLOAD_LINK" ]; then
+              echo "$UPLOAD_LINK" > last_backup_url.txt
+              echo "✅ Upload successful: $UPLOAD_LINK"
+            else
+              # Create a placeholder URL if upload fails
+              echo "https://transfer.sh/backup_failed_$(date +%s)" > last_backup_url.txt
+              echo "⚠️ Upload failed, created placeholder URL"
+            fi
+          else
+            # Create a placeholder URL if backup file is empty/missing
+            echo "https://transfer.sh/no_backup_$(date +%s)" > last_backup_url.txt
+            echo "⚠️ Backup file missing or empty, created placeholder URL"
+          fi
+
+      - name: 🔄 Pull latest changes
+        continue-on-error: true
+        run: |
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git pull --rebase origin main || echo "Pull failed - continuing"
+
+      - name: 📤 Save SSH link + backup URL
+        continue-on-error: true
+        run: |
+          git add links/*.txt last_backup_url.txt || echo "No files to add"
+          git commit -m "🔁 Updated SSH + backup URL" || echo "Nothing to commit"
+          git push origin main || echo "Push failed - continuing"
+
+      - name: 🔁 Restart workflow automatically
+        continue-on-error: true
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/${{ github.repository }}/dispatches \
+            -d '{"event_type": "create-vps", "client_payload": {"vps_name": "manual-vps", "backup": true}}' \
+          || echo "Restart request failed"
