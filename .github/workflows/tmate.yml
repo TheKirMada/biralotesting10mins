@@ -26,6 +26,36 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
+      - name: 🔧 Create PufferPanel setup script
+        run: |
+          echo "📝 Creating PufferPanel setup script..."
+          cat > puffer_setup.sh << 'EOF'
+          #!/bin/bash
+          # Wait for PufferPanel to be ready
+          echo "⏳ Waiting for PufferPanel to start..."
+          sleep 30
+          
+          # Try multiple methods to create user
+          echo "👤 Attempting to create admin user..."
+          
+          # Method 1: Try API registration
+          if curl -X POST http://localhost:8080/api/auth/register \
+            -H "Content-Type: application/json" \
+            -d '{"username":"thekirmada","password":"thekirmada2009","email":"xblankx79@gmail.com","admin":true}' > /dev/null 2>&1; then
+            echo "✅ User created via API"
+          else
+            echo "❌ API method failed, trying alternative methods..."
+            # Method 2: Manual setup instructions
+            echo "📋 Manual setup required:"
+            echo "1. Open PufferPanel at the ngrok URL"
+            echo "2. Create admin account manually with:"
+            echo "   Username: thekirmada"
+            echo "   Password: thekirmada2009"
+            echo "   Email: xblankx79@gmail.com"
+          fi
+          EOF
+          chmod +x puffer_setup.sh
+
       - name: 🔧 Install PufferPanel (Docker Method)
         run: |
           echo "🚀 Installing PufferPanel using Docker..."
@@ -44,22 +74,9 @@ jobs:
             --name pufferpanel \
             pufferpanel/pufferpanel:latest
           
-          # Wait for PufferPanel to start
-          echo "⏳ Waiting for PufferPanel to start..."
-          sleep 30
-          
-          # Create admin user using HTTP API (since CLI and SQL don't work)
-          echo "👤 Creating admin user: thekirmada"
-          curl -X POST http://localhost:8080/api/auth/register \
-            -H "Content-Type: application/json" \
-            -d '{
-              "username": "thekirmada",
-              "password": "thekirmada2009",
-              "email": "xblankx79@gmail.com",
-              "admin": true
-            }' || echo "User creation attempted (may fail if panel not fully ready)"
-          
-          echo "✅ PufferPanel running on port 8080. Login with thekirmada/thekirmada2009"
+          # Run setup script in background
+          nohup ./puffer_setup.sh > puffer_setup.log 2>&1 &
+          echo "✅ PufferPanel running on port 8080. Setup script started."
 
       - name: 🔧 Install and Setup ngrok
         run: |
@@ -82,6 +99,11 @@ jobs:
           if [ -n "$NGROK_URL" ]; then
             echo "✅ Public URL: $NGROK_URL"
             echo "$NGROK_URL" > ngrok_url.txt
+            echo "📋 Login Credentials:"
+            echo "URL: $NGROK_URL"
+            echo "Username: thekirmada"
+            echo "Password: thekirmada2009"
+            echo "Email: xblankx79@gmail.com"
           else
             echo "❌ Could not retrieve ngrok URL. Check ngrok.log for details:"
             cat ngrok.log || echo "No ngrok log available"
