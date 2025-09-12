@@ -30,7 +30,6 @@ jobs:
         run: |
           echo "🚀 Setting up system and installing dependencies..."
           sudo apt update -y
-          sudo apt upgrade -y
           sudo apt install -y curl
           echo "✅ System updated and dependencies installed"
 
