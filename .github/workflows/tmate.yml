@@ -26,10 +26,10 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
-      - name: 🔧 Update system (sudo already available)
+      - name: 🔧 Update system
         run: |
           echo "🚀 Updating system..."
-          sudo apt update
+          apt update
           echo "✅ System updated"
 
       - name: 🔧 Install PufferPanel
@@ -37,33 +37,26 @@ jobs:
           echo "🚀 Installing PufferPanel..."
           curl -s https://raw.githubusercontent.com/abdalla435/VPS-Pterodactyl-EGG/main/vpsfree.sh > main.sh
           # Automate the PufferPanel installation
-          echo -e "2\n8080\nthekirmada\nthekirmada2009\nxblankx79@gmail.com" | sudo bash main.sh
+          echo -e "2\n8080\nthekirmada\nthekirmada2009\nxblankx79@gmail.com" | bash main.sh
           echo "✅ PufferPanel installation completed"
 
       - name: 🔧 Install and Setup ngrok
         run: |
           echo "🚀 Installing ngrok..."
-          # Install ngrok
-          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
-            | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null \
-            && echo "deb https://ngrok-agent.s3.amazonaws.com bookworm main" \
-            | sudo tee /etc/apt/sources.list.d/ngrok.list \
-            && sudo apt update \
-            && sudo apt install -y ngrok
-          
-          echo "✅ ngrok installed"
-          
-          # Add authtoken
-          ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
-          echo "✅ ngrok authtoken configured"
+          # Download ngrok directly (no apt/sudo needed)
+          wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+          tar -xzf ngrok-v3-stable-linux-amd64.tgz
+          chmod +x ngrok
+          ./ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
+          echo "✅ ngrok installed and configured"
           
           # Start ngrok tunnel in background
-          nohup ngrok http http://localhost:8080 > ngrok.log 2>&1 &
+          nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
           echo "✅ ngrok tunnel started on port 8080"
 
       - name: 🔐 Start tmate session
         run: |
-          sudo apt update -y && sudo apt install -y tmate
+          apt update -y && apt install -y tmate
           tmate -S /tmp/tmate.sock new-session -d
           tmate -S /tmp/tmate.sock wait tmate-ready
           SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
@@ -100,11 +93,9 @@ jobs:
           # Check and add directories that exist
           [ -d "/var/lib/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /var/lib/pufferpanel"
           [ -d "/etc/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /etc/pufferpanel"
-          [ -f "/etc/apt/sources.list.d/ngrok.list" ] && BACKUP_DIRS="$BACKUP_DIRS /etc/apt/sources.list.d/ngrok.list"
-          [ -f "/etc/apt/trusted.gpg.d/ngrok.asc" ] && BACKUP_DIRS="$BACKUP_DIRS /etc/apt/trusted.gpg.d/ngrok.asc"
+          [ -f "./ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS ./ngrok"
           [ -d "/root/.ngrok2" ] && BACKUP_DIRS="$BACKUP_DIRS /root/.ngrok2"
           [ -f "/root/main.sh" ] && BACKUP_DIRS="$BACKUP_DIRS /root/main.sh"
-          [ -f "/usr/bin/ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS /usr/bin/ngrok"
           
           # Check for any user ngrok configs
           for user_dir in /home/*; do
@@ -117,7 +108,7 @@ jobs:
           
           # Create backup of only existing files
           if [ "$BACKUP_DIRS" != "backup_meta" ]; then
-            sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
+            tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
           else
             echo "⚠️ No PufferPanel/ngrok files found, creating package list only"
             tar -czf vps_backup.tar.gz backup_meta/ 2>/dev/null || true
