@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
-# backup-restore.sh  - Robust backup & restore helpers for the VPS workflow
-# Usage:
-#   ./backup-restore.sh restore_backup
-#   ./backup-restore.sh backup_and_upload
+# OPTIMIZED backup-restore.sh - Fast and reliable backup for VPS
 
 set -u
 
@@ -11,21 +8,24 @@ LAST_BACKUP_FILE="last_backup_url.txt"
 TRANSFER_BASE="https://transfer.sh"
 RETRIES=3
 RETRY_DELAY=5
-# Directories to include in backup - keeps archive smaller than full root but
-# preserves packages, configs and common service data:
-INCLUDE_DIRS=(/etc /var /usr/local /opt /home)
-# Exclusions (avoid special, volatile or huge caches)
+
+# CRITICAL DIRECTORIES ONLY (fast backup)
+INCLUDE_DIRS=(/etc /home /usr/local /opt /var/lib/pufferpanel)
+
+# SMART EXCLUSIONS (avoid huge directories)
 EXCLUDES=(
-  "/proc/*"
-  "/sys/*"
-  "/dev/*"
-  "/run/*"
-  "/tmp/*"
-  "/var/tmp/*"
-  "/var/cache/apt/archives/*"
-  "/mnt/*"
-  "/media/*"
-  "*/lost+found"
+  "/var/lib/docker/*"      # Docker images - HUGE
+  "/var/log/*"             # Log files - HUGE
+  "/var/cache/apt/*"       # APT cache - large
+  "/var/tmp/*"             # Temporary files
+  "/tmp/*"                 # Temporary files
+  "/proc/*"                # Virtual filesystem
+  "/sys/*"                 # Virtual filesystem
+  "/dev/*"                 # Device files
+  "/run/*"                 # Runtime data
+  "/mnt/*"                 # Mount points
+  "/media/*"               # Media mounts
+  "*/lost+found"           # Recovery directories
 )
 
 log() { printf '%b\n' "$*"; }
@@ -46,10 +46,9 @@ restore_backup() {
   fi
 
   log "➡️  Downloading backup from: $BACKUP_URL"
-  # download with retries
-  curl_opts=(--silent --show-error --fail --location)
+  curl_opts=(--silent --show-error --fail --location --max-time 1200)
   for i in $(seq 1 $RETRIES); do
-    if curl "${curl_opts[@]}" --output "$BACKUP_NAME" --max-time 1200 --retry 2 --retry-delay 5 "$BACKUP_URL"; then
+    if curl "${curl_opts[@]}" --output "$BACKUP_NAME" "$BACKUP_URL"; then
       log "✅ Download succeeded."
       break
     else
@@ -62,15 +61,13 @@ restore_backup() {
     fi
   done
 
-  # extract (requires sudo to write to system locations)
   if [ -f "$BACKUP_NAME" ]; then
-    log "🔧 Extracting $BACKUP_NAME (this may overwrite files) ..."
-    # Extract with sudo; if extract fails we report error
+    log "🔧 Extracting $BACKUP_NAME..."
     if sudo tar -xzf "$BACKUP_NAME" -C /; then
       log "✅ Extraction completed."
       return 0
     else
-      err "Failed to extract backup archive (tar exit != 0)."
+      err "Failed to extract backup archive."
       return 3
     fi
   else
@@ -80,55 +77,45 @@ restore_backup() {
 }
 
 backup_and_upload() {
-  log "💾 backup_and_upload: starting"
+  log "💾 backup_and_upload: starting (FAST MODE)"
 
-  # prepare metadata
+  # Save package list
   mkdir -p backup_meta
-  log "📦 Saving installed package list to backup_meta/installed_packages.txt"
-  dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || log "⚠️ dpkg list failed (non-debian or no permission)"
+  log "📦 Saving installed package list"
+  dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || log "⚠️ dpkg list failed"
 
-  # Build tar arguments for includes and excludes
-  TAR_ARGS=()
-  for d in "${INCLUDE_DIRS[@]}"; do
-    TAR_ARGS+=( "$d" )
-  done
+  # Build tar command
+  TAR_CMD="sudo tar -czf $BACKUP_NAME"
+  
+  # Add excludes
   for ex in "${EXCLUDES[@]}"; do
-    TAR_ARGS+=( --exclude="$ex" )
+    TAR_CMD="$TAR_CMD --exclude=\"$ex\""
   done
-  TAR_ARGS+=( backup_meta )
+  
+  # Add includes
+  TAR_CMD="$TAR_CMD ${INCLUDE_DIRS[@]} backup_meta"
 
-  # Create archive; capture exit code but don't print massive tar warnings
-  log "🔨 Creating archive $BACKUP_NAME (this may take a while)..."
-  if sudo tar czf "$BACKUP_NAME" "${TAR_ARGS[@]}" 2>/tmp/tar.stderr; then
+  log "🔨 Creating archive $BACKUP_NAME (FAST MODE)..."
+  eval $TAR_CMD 2>/tmp/tar.stderr
+  
+  if [ $? -eq 0 ]; then
     log "✅ Archive created: $BACKUP_NAME"
   else
-    # Show last few lines of tar stderr for debugging
-    log "⚠️ tar reported warnings/errors (they are in /tmp/tar.stderr). Continuing best-effort."
-    tail -n 50 /tmp/tar.stderr || true
-    # If archive exists but tar returned non-zero, we will still try to upload if present
-    if [ ! -f "$BACKUP_NAME" ]; then
-      err "tar failed and archive wasn't created. Nothing to upload."
-      return 5
-    fi
+    log "⚠️ tar had issues (check /tmp/tar.stderr), but continuing..."
   fi
 
-  # sanity check archive size (warn if too big)
-  size_bytes=0
+  # Check size
   if [ -f "$BACKUP_NAME" ]; then
     size_bytes=$(stat -c%s "$BACKUP_NAME" 2>/dev/null || echo 0)
     size_mb=$((size_bytes / 1024 / 1024))
     log "📏 Archive size: ${size_mb}MB"
-    if [ "$size_bytes" -gt $((10 * 1024 * 1024 * 1024)) ]; then
-      err "Archive >10GB; transfer.sh may reject this. Consider smaller includes."
-      # we still attempt upload, but warn
-    fi
   fi
 
-  # Upload with retries
+  # Upload
   log "⬆️  Uploading to $TRANSFER_BASE ..."
   UPLOAD_LINK=""
   for i in $(seq 1 $RETRIES); do
-    UPLOAD_LINK=$(curl --silent --show-error --fail --retry 2 --retry-delay 5 --upload-file "$BACKUP_NAME" "$TRANSFER_BASE/$BACKUP_NAME" 2>/dev/null) || UPLOAD_LINK=""
+    UPLOAD_LINK=$(curl --silent --show-error --fail --max-time 300 --upload-file "$BACKUP_NAME" "$TRANSFER_BASE/$BACKUP_NAME") || UPLOAD_LINK=""
     if [ -n "$UPLOAD_LINK" ]; then
       log "🆙 Upload succeeded: $UPLOAD_LINK"
       break
@@ -143,10 +130,8 @@ backup_and_upload() {
     return 6
   fi
 
-  # save URL to file for workflow to commit
   echo "$UPLOAD_LINK" > "$LAST_BACKUP_FILE"
   log "💾 Saved upload link to $LAST_BACKUP_FILE"
-
   return 0
 }
 
