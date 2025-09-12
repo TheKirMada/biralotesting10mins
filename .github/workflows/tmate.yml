@@ -26,12 +26,17 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
-      - name: 🔧 Setup System & Install Dependencies
+      - name: 🔧 Install sudo first
         run: |
-          echo "🚀 Setting up system and installing dependencies..."
-          sudo apt update -y
-          sudo apt install -y curl
-          echo "✅ System updated and dependencies installed"
+          echo "🚀 Installing sudo first..."
+          apt install -y sudo
+          echo "✅ sudo installed"
+
+      - name: 🔧 Update system
+        run: |
+          echo "🚀 Updating system..."
+          sudo apt update
+          echo "✅ System updated"
 
       - name: 🔧 Install PufferPanel
         run: |
