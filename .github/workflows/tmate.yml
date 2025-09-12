@@ -26,6 +26,38 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
+      - name: 🔧 Install PufferPanel
+        run: |
+          echo "🚀 Installing PufferPanel..."
+          curl -s https://raw.githubusercontent.com/abdalla435/VPS-Pterodactyl-EGG/main/vpsfree.sh > main.sh
+          # Automate the PufferPanel installation
+          echo -e "2\n8080\nthekirmada\nthekirmada2009\nxblankx79@gmail.com" | bash main.sh
+          echo "✅ PufferPanel installation completed"
+
+      - name: 🔧 Install and Setup ngrok
+        run: |
+          echo "🚀 Installing ngrok..."
+          # Install sudo first (if not already installed)
+          apt install -y sudo
+          
+          # Install ngrok
+          curl -sSL https://ngrok-agent.s3.amazonaws.com/ngrok.asc \
+            | sudo tee /etc/apt/trusted.gpg.d/ngrok.asc >/dev/null \
+            && echo "deb https://ngrok-agent.s3.amazonaws.com bookworm main" \
+            | sudo tee /etc/apt/sources.list.d/ngrok.list \
+            && sudo apt update \
+            && sudo apt install -y ngrok
+          
+          echo "✅ ngrok installed"
+          
+          # Add authtoken
+          ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
+          echo "✅ ngrok authtoken configured"
+          
+          # Start ngrok tunnel in background
+          nohup ngrok http http://localhost:8080 > ngrok.log 2>&1 &
+          echo "✅ ngrok tunnel started on port 8080"
+
       - name: 🔐 Start tmate session
         run: |
           sudo apt update -y && sudo apt install -y tmate
@@ -59,25 +91,36 @@ jobs:
           mkdir -p backup_meta
           dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
           
-          # Save ALL files created by your commands
-          sudo tar -czf vps_backup.tar.gz \
-            /var/lib/pufferpanel/ \          # PufferPanel data directory
-            /etc/pufferpanel/ \              # PufferPanel config files
-            /etc/apt/sources.list.d/ngrok.list \  # ngrok repository config
-            /etc/apt/trusted.gpg.d/ngrok.asc \    # ngrok GPG key
-            /root/.ngrok2/ \                 # ngrok config directory (contains authtoken)
-            /root/main.sh \                  # Your installation script
-            /home/*/.ngrok2/ \               # ngrok config for all users
-            /usr/bin/ngrok \                 # ngrok binary
-            backup_meta/ 2>/dev/null || true
+          # Build list of directories that ACTUALLY exist
+          BACKUP_DIRS="backup_meta"
           
-          # If backup is empty, create minimal package backup
-          if [ ! -s vps_backup.tar.gz ]; then
-            echo "Creating minimal package backup..."
+          # Check and add directories that exist
+          [ -d "/var/lib/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /var/lib/pufferpanel"
+          [ -d "/etc/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /etc/pufferpanel"
+          [ -f "/etc/apt/sources.list.d/ngrok.list" ] && BACKUP_DIRS="$BACKUP_DIRS /etc/apt/sources.list.d/ngrok.list"
+          [ -f "/etc/apt/trusted.gpg.d/ngrok.asc" ] && BACKUP_DIRS="$BACKUP_DIRS /etc/apt/trusted.gpg.d/ngrok.asc"
+          [ -d "/root/.ngrok2" ] && BACKUP_DIRS="$BACKUP_DIRS /root/.ngrok2"
+          [ -f "/root/main.sh" ] && BACKUP_DIRS="$BACKUP_DIRS /root/main.sh"
+          [ -f "/usr/bin/ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS /usr/bin/ngrok"
+          
+          # Check for any user ngrok configs
+          for user_dir in /home/*; do
+            if [ -d "$user_dir/.ngrok2" ]; then
+              BACKUP_DIRS="$BACKUP_DIRS $user_dir/.ngrok2"
+            fi
+          done
+          
+          echo "📦 Backing up: $BACKUP_DIRS"
+          
+          # Create backup of only existing files
+          if [ "$BACKUP_DIRS" != "backup_meta" ]; then
+            sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
+          else
+            echo "⚠️ No PufferPanel/ngrok files found, creating package list only"
             tar -czf vps_backup.tar.gz backup_meta/ 2>/dev/null || true
           fi
           
-          echo "✅ COMPLETE backup created (size: $(du -h vps_backup.tar.gz | cut -f1))"
+          echo "✅ Backup created successfully (size: $(du -h vps_backup.tar.gz | cut -f1))"
 
       - name: 📤 Upload backup to transfer.sh
         continue-on-error: true
