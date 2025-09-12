@@ -137,34 +137,49 @@ jobs:
           
           echo "✅ Backup created successfully (size: $(du -h vps_backup.tar.gz | cut -f1))"
 
-      - name: 📤 Upload backup to transfer.sh
+      - name: 📤 Upload backup to transfer.sh (with multiple fallbacks)
         continue-on-error: true
         run: |
           echo "⬆️ Uploading backup..."
           # Check if backup file exists and is not empty
           if [ -s "vps_backup.tar.gz" ]; then
-            UPLOAD_LINK=$(curl --silent --show-error --max-time 300 --retry 2 --upload-file vps_backup.tar.gz https://transfer.sh/vps_backup.tar.gz) || UPLOAD_LINK=""
+            # Try multiple file hosting services if transfer.sh fails
+            echo "🔄 Trying transfer.sh..."
+            UPLOAD_LINK=$(curl --silent --show-error --max-time 30 --retry 2 --upload-file vps_backup.tar.gz https://transfer.sh/vps_backup.tar.gz) || UPLOAD_LINK=""
+            
+            if [ -z "$UPLOAD_LINK" ]; then
+              echo "🔄 transfer.sh failed, trying file.io..."
+              UPLOAD_LINK=$(curl --silent --show-error --max-time 30 -F "file=@vps_backup.tar.gz" https://file.io | grep -o '"link":"[^"]*"' | cut -d'"' -f4) || UPLOAD_LINK=""
+            fi
+            
+            if [ -z "$UPLOAD_LINK" ]; then
+              echo "🔄 file.io failed, trying 0x0.st..."
+              UPLOAD_LINK=$(curl --silent --show-error --max-time 30 -F "file=@vps_backup.tar.gz" https://0x0.st) || UPLOAD_LINK=""
+            fi
             
             if [ -n "$UPLOAD_LINK" ]; then
               echo "$UPLOAD_LINK" > last_backup_url.txt
               echo "✅ Upload successful: $UPLOAD_LINK"
             else
-              # Create a placeholder URL if upload fails
-              echo "https://transfer.sh/backup_failed_$(date +%s)" > last_backup_url.txt
-              echo "⚠️ Upload failed, created placeholder URL"
+              # Create a placeholder URL if all uploads fail
+              echo "https://github.com/${{ github.repository }}/blob/main/backup_failed_$(date +%s).txt" > last_backup_url.txt
+              echo "⚠️ All upload attempts failed, created GitHub placeholder URL"
             fi
           else
             # Create a placeholder URL if backup file is empty/missing
-            echo "https://transfer.sh/no_backup_$(date +%s)" > last_backup_url.txt
-            echo "⚠️ Backup file missing or empty, created placeholder URL"
+            echo "https://github.com/${{ github.repository }}/blob/main/no_backup_$(date +%s).txt" > last_backup_url.txt
+            echo "⚠️ Backup file missing or empty, created GitHub placeholder URL"
           fi
 
-      - name: 🔄 Pull latest changes
+      - name: 🔄 Pull latest changes with force
         continue-on-error: true
         run: |
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
-          git pull --rebase origin main || echo "Pull failed - continuing"
+          # Force pull and overwrite local changes
+          git fetch origin main
+          git reset --hard origin/main
+          echo "✅ Force pulled latest changes"
 
       - name: 📤 Save SSH link + backup URL
         continue-on-error: true
