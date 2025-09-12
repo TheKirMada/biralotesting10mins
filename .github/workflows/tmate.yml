@@ -2,6 +2,19 @@ name: Create VPS (Auto-Restart & Safe)
 
 on:
   workflow_dispatch:
+    inputs:
+      puffer_username:
+        description: 'PufferPanel Admin Username'
+        required: true
+        default: 'thekirmada'
+      puffer_password:
+        description: 'PufferPanel Admin Password' 
+        required: true
+        default: 'thekirmada2009'
+      puffer_email:
+        description: 'PufferPanel Admin Email'
+        required: true
+        default: 'xblankx79@gmail.com'
   repository_dispatch:
     types: [create-vps]
 
@@ -26,9 +39,9 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
-      - name: 🔧 Install PufferPanel with Pre-configured Admin
+      - name: 🔧 Install PufferPanel
         run: |
-          echo "🚀 Installing PufferPanel with pre-configured admin account..."
+          echo "🚀 Installing PufferPanel..."
           # Install Docker without sudo using official script
           curl -fsSL https://get.docker.com -o get-docker.sh
           sh get-docker.sh
@@ -36,18 +49,26 @@ jobs:
           # Create PufferPanel data directory
           mkdir -p /home/runner/pufferpanel/data
           
-          # Run PufferPanel with ADMIN credentials pre-set via environment variables
+          # Run PufferPanel in Docker
           docker run -d \
             -p 8080:8080 \
             -v /home/runner/pufferpanel/data:/etc/pufferpanel \
             -v /home/runner/pufferpanel/servers:/var/lib/pufferpanel \
-            -e PUFFERPANEL_DEFAULT_USER="thekirmada" \
-            -e PUFFERPANEL_DEFAULT_PASSWORD="thekirmada2009" \
-            -e PUFFERPANEL_DEFAULT_EMAIL="xblankx79@gmail.com" \
             --name pufferpanel \
             pufferpanel/pufferpanel:latest
           
-          echo "✅ PufferPanel running with pre-configured admin account"
+          echo "✅ PufferPanel running on port 8080"
+          echo ""
+          echo "🎯 Manual Setup Required:"
+          echo "========================="
+          echo "1. Wait for ngrok URL to appear below"
+          echo "2. Open the ngrok URL in your browser" 
+          echo "3. MANUALLY create your admin account with:"
+          echo "   - Username: ${{ github.event.inputs.puffer_username }}"
+          echo "   - Password: ${{ github.event.inputs.puffer_password }}"
+          echo "   - Email: ${{ github.event.inputs.puffer_email }}"
+          echo "4. This will be your ADMIN account"
+          echo "========================="
 
       - name: 🔧 Install and Setup ngrok
         run: |
@@ -71,14 +92,14 @@ jobs:
             echo "✅ Public URL: $NGROK_URL"
             echo "$NGROK_URL" > ngrok_url.txt
             echo ""
-            echo "🎯 PufferPanel Admin Access:"
-            echo "============================"
-            echo "URL: $NGROK_URL"
-            echo "Username: thekirmada"
-            echo "Password: thekirmada2009"
-            echo "Email: xblankx79@gmail.com"
-            echo "============================"
-            echo "This account has FULL ADMIN privileges"
+            echo "🎯 Manual Account Creation:"
+            echo "==========================="
+            echo "OPEN THIS URL: $NGROK_URL"
+            echo "CREATE ADMIN ACCOUNT WITH:"
+            echo "Username: ${{ github.event.inputs.puffer_username }}"
+            echo "Password: ${{ github.event.inputs.puffer_password }}"
+            echo "Email: ${{ github.event.inputs.puffer_email }}"
+            echo "==========================="
           else
             echo "❌ Could not retrieve ngrok URL. Check ngrok.log for details:"
             cat ngrok.log || echo "No ngrok log available"
