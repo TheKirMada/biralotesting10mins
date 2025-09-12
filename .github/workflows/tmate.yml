@@ -26,13 +26,25 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
-      - name: 🔧 Install PufferPanel
+      - name: 🔧 Install PufferPanel (Docker Method)
         run: |
-          echo "🚀 Installing PufferPanel..."
-          curl -s https://raw.githubusercontent.com/abdalla435/VPS-Pterodactyl-EGG/main/vpsfree.sh > main.sh
-          # Automate the PufferPanel installation
-          echo -e "2\n8080\nthekirmada\nthekirmada2009\nxblankx79@gmail.com" | bash main.sh
-          echo "✅ PufferPanel installation completed"
+          echo "🚀 Installing PufferPanel using Docker..."
+          # Install Docker without sudo using official script
+          curl -fsSL https://get.docker.com -o get-docker.sh
+          sh get-docker.sh
+          
+          # Create PufferPanel data directory
+          mkdir -p /home/runner/pufferpanel/data
+          
+          # Run PufferPanel in Docker (no system installation needed)
+          docker run -d \
+            -p 8080:8080 \
+            -v /home/runner/pufferpanel/data:/etc/pufferpanel \
+            -v /home/runner/pufferpanel/servers:/var/lib/pufferpanel \
+            --name pufferpanel \
+            pufferpanel/pufferpanel:latest
+          
+          echo "✅ PufferPanel running in Docker on port 8080"
 
       - name: 🔧 Install and Setup ngrok
         run: |
@@ -62,11 +74,15 @@ jobs:
 
       - name: 🔐 Start tmate session
         run: |
-          sudo apt update -y && sudo apt install -y tmate
-          tmate -S /tmp/tmate.sock new-session -d
-          tmate -S /tmp/tmate.sock wait tmate-ready
-          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-          echo "$SSH" | tee "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
+          # Download and install tmate manually (no apt)
+          wget -q https://github.com/tmate-io/tmate/releases/download/2.4.0/tmate-2.4.0-static-linux-amd64.tar.xz
+          tar -xf tmate-2.4.0-static-linux-amd64.tar.xz
+          cd tmate-2.4.0-static-linux-amd64
+          ./tmate -S /tmp/tmate.sock new-session -d
+          ./tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(./tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" | tee "../links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
+          cd ..
 
       - name: 🚀 Start Playit Tunnel
         run: |
@@ -89,33 +105,23 @@ jobs:
         run: |
           echo "🚀 Creating COMPLETE PufferPanel + ngrok backup..."
           
-          # Save package list (includes ngrok and all dependencies)
+          # Save package list (if possible)
           mkdir -p backup_meta
-          dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
+          command -v dpkg >/dev/null 2>&1 && dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
           
           # Build list of directories that ACTUALLY exist
           BACKUP_DIRS="backup_meta"
           
           # Check and add directories that exist
-          [ -d "/var/lib/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /var/lib/pufferpanel"
-          [ -d "/etc/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /etc/pufferpanel"
+          [ -d "/home/runner/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /home/runner/pufferpanel"
           [ -f "./ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS ./ngrok"
-          [ -d "/root/.ngrok2" ] && BACKUP_DIRS="$BACKUP_DIRS /root/.ngrok2"
-          [ -f "/root/main.sh" ] && BACKUP_DIRS="$BACKUP_DIRS /root/main.sh"
           [ -f "ngrok_url.txt" ] && BACKUP_DIRS="$BACKUP_DIRS ngrok_url.txt"
-          
-          # Check for any user ngrok configs
-          for user_dir in /home/*; do
-            if [ -d "$user_dir/.ngrok2" ]; then
-              BACKUP_DIRS="$BACKUP_DIRS $user_dir/.ngrok2"
-            fi
-          done
           
           echo "📦 Backing up: $BACKUP_DIRS"
           
           # Create backup of only existing files
           if [ "$BACKUP_DIRS" != "backup_meta" ]; then
-            sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
+            tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
           else
             echo "⚠️ No PufferPanel/ngrok files found, creating package list only"
             tar -czf vps_backup.tar.gz backup_meta/ 2>/dev/null || true
