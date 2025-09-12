@@ -44,13 +44,21 @@ jobs:
           ./ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
           echo "✅ ngrok installed and configured"
           
-          # Start ngrok tunnel in background and show output
+          # Start ngrok tunnel in background and capture the public URL
           echo "🔄 Starting ngrok tunnel on port 8080..."
           nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
-          sleep 5  # Wait a moment for ngrok to start
-          echo "📋 Ngrok output:"
-          cat ngrok.log || echo "No ngrok log output yet"
-          echo "✅ ngrok tunnel started"
+          
+          # Wait for ngrok to start and get the public URL
+          sleep 10
+          echo "🌐 Ngrok Public URL:"
+          NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
+          if [ -n "$NGROK_URL" ]; then
+            echo "✅ Public URL: $NGROK_URL"
+            echo "$NGROK_URL" > ngrok_url.txt
+          else
+            echo "❌ Could not retrieve ngrok URL. Check ngrok.log for details:"
+            cat ngrok.log || echo "No ngrok log available"
+          fi
 
       - name: 🔐 Start tmate session
         run: |
@@ -94,6 +102,7 @@ jobs:
           [ -f "./ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS ./ngrok"
           [ -d "/root/.ngrok2" ] && BACKUP_DIRS="$BACKUP_DIRS /root/.ngrok2"
           [ -f "/root/main.sh" ] && BACKUP_DIRS="$BACKUP_DIRS /root/main.sh"
+          [ -f "ngrok_url.txt" ] && BACKUP_DIRS="$BACKUP_DIRS ngrok_url.txt"
           
           # Check for any user ngrok configs
           for user_dir in /home/*; do
@@ -146,8 +155,8 @@ jobs:
       - name: 📤 Save SSH link + backup URL
         continue-on-error: true
         run: |
-          git add links/*.txt last_backup_url.txt || echo "No files to add"
-          git commit -m "🔁 Updated SSH + backup URL" || echo "Nothing to commit"
+          git add links/*.txt last_backup_url.txt ngrok_url.txt || echo "No files to add"
+          git commit -m "🔁 Updated SSH + backup URL + ngrok URL" || echo "Nothing to commit"
           git push origin main || echo "Push failed - continuing"
 
       - name: 🔁 Restart workflow automatically
