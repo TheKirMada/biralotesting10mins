@@ -26,13 +26,7 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
-      - name: 🔧 Install sudo first
-        run: |
-          echo "🚀 Installing sudo first..."
-          apt install -y sudo
-          echo "✅ sudo installed"
-
-      - name: 🔧 Update system
+      - name: 🔧 Update system (sudo already available)
         run: |
           echo "🚀 Updating system..."
           sudo apt update
