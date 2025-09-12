@@ -1,0 +1,108 @@
+name: Create VPS (Auto-Restart & Safe)
+
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [create-vps]
+
+jobs:
+  start-vps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TMATE_SERVER: nyc1.tmate.io
+
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v3
+
+      - name: 📁 Prepare dirs
+        run: mkdir -p links .backup backup_meta
+
+      - name: 🛠️ Make backup script executable
+        run: chmod +x backup-restore.sh
+
+      - name: 💾 Check for existing backup
+        id: check-backup
+        run: |
+          if [ -f "last_backup_url.txt" ]; then
+            echo "BACKUP_EXISTS=true" >> $GITHUB_OUTPUT
+          else
+            echo "BACKUP_EXISTS=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 💾 Restore backup (if exists)
+        if: steps.check-backup.outputs.BACKUP_EXISTS == 'true'
+        run: ./backup-restore.sh restore_backup
+
+      - name: 🔐 Start tmate session
+        run: |
+          sudo apt update -y && sudo apt install -y tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" | tee "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
+
+      - name: 🚀 Start Playit Tunnel
+        run: |
+          wget -q https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-linux-amd64 -O playit
+          chmod +x playit
+          nohup ./playit > playit.log 2>&1 &
+          echo "✅ Playit started."
+
+      - name: ⏳ Keep VPS alive (8 min safe period)
+        run: |
+          i=1
+          while [ $i -le 8 ]; do
+            echo "🟢 Running minute $i/8..."
+            sleep 60
+            i=$((i+1))
+          done
+
+      - name: 📦 Create FAST essential backup
+        timeout-minutes: 15
+        run: |
+          echo "🚀 Creating FAST essential backup..."
+          # Save package list FIRST
+          dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
+          
+          # Create backup of ONLY critical directories (fast and focused)
+          sudo tar -czf vps_backup.tar.gz \
+            --exclude='/var/tmp/*' \
+            --exclude='/var/cache/apt/archives/*' \
+            --exclude='/tmp/*' \
+            /etc /var/lib/pufferpanel /home /usr/local/bin /opt backup_meta/
+          
+          echo "✅ Backup created successfully"
+
+      - name: 📤 Upload backup to transfer.sh
+        continue-on-error: true
+        run: |
+          echo "⬆️ Uploading backup..."
+          UPLOAD_LINK=$(curl --silent --show-error --max-time 300 --retry 3 --retry-delay 5 --upload-file vps_backup.tar.gz https://transfer.sh/vps_backup.tar.gz)
+          echo "$UPLOAD_LINK" > last_backup_url.txt
+          echo "✅ Upload successful: $UPLOAD_LINK"
+
+      - name: 🔄 Pull latest changes
+        continue-on-error: true
+        run: |
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git pull --rebase origin main || echo "Pull failed - continuing"
+
+      - name: 💾 Commit backup info
+        continue-on-error: true
+        run: |
+          git add links/*.txt last_backup_url.txt backup_meta/
+          git commit -m "🔁 Updated VPS backup & SSH links" || echo "Nothing to commit"
+          git push origin main || echo "Push failed - continuing"
+
+      - name: 🔁 Restart workflow automatically
+        continue-on-error: true
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/${{ github.repository }}/dispatches \
+            -d '{"event_type": "create-vps", "client_payload": {"vps_name": "manual-vps", "backup": true}}'
