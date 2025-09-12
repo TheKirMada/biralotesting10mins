@@ -44,21 +44,21 @@ jobs:
           ./ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
           echo "✅ ngrok installed and configured"
           
-          # Start ngrok tunnel in background
+          # Start ngrok tunnel in background and show output
+          echo "🔄 Starting ngrok tunnel on port 8080..."
           nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
-          echo "✅ ngrok tunnel started on port 8080"
+          sleep 5  # Wait a moment for ngrok to start
+          echo "📋 Ngrok output:"
+          cat ngrok.log || echo "No ngrok log output yet"
+          echo "✅ ngrok tunnel started"
 
       - name: 🔐 Start tmate session
         run: |
-          # Download and install tmate manually (no apt)
-          wget -q https://github.com/tmate-io/tmate/releases/download/2.4.0/tmate-2.4.0-static-linux-amd64.tar.xz
-          tar -xf tmate-2.4.0-static-linux-amd64.tar.xz
-          cd tmate-2.4.0-static-linux-amd64
-          ./tmate -S /tmp/tmate.sock new-session -d
-          ./tmate -S /tmp/tmate.sock wait tmate-ready
-          SSH=$(./tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
-          echo "$SSH" | tee "../links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
-          cd ..
+          sudo apt update -y && sudo apt install -y tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" | tee "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
 
       - name: 🚀 Start Playit Tunnel
         run: |
@@ -81,9 +81,9 @@ jobs:
         run: |
           echo "🚀 Creating COMPLETE PufferPanel + ngrok backup..."
           
-          # Save package list (if possible)
+          # Save package list (includes ngrok and all dependencies)
           mkdir -p backup_meta
-          command -v dpkg >/dev/null 2>&1 && dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
+          dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
           
           # Build list of directories that ACTUALLY exist
           BACKUP_DIRS="backup_meta"
@@ -106,7 +106,7 @@ jobs:
           
           # Create backup of only existing files
           if [ "$BACKUP_DIRS" != "backup_meta" ]; then
-            tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
+            sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
           else
             echo "⚠️ No PufferPanel/ngrok files found, creating package list only"
             tar -czf vps_backup.tar.gz backup_meta/ 2>/dev/null || true
