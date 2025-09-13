@@ -48,9 +48,24 @@ jobs:
           ./ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
           echo "✅ ngrok installed and configured"
           
-          # Start ngrok tunnel in background
-          echo "🔄 Starting ngrok tunnel..."
+          # Start ngrok tunnel in background and capture the public URL
+          echo "🔄 Starting ngrok tunnel on port 8080..."
           nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
+          
+          # Wait for ngrok to start and get the public URL
+          sleep 15
+          echo "🌐 Ngrok Public URL:"
+          NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
+          if [ -n "$NGROK_URL" ]; then
+            echo "✅ Public URL: $NGROK_URL"
+            echo "$NGROK_URL" > ngrok_url.txt
+            echo ""
+            echo "🎯 Access your VPS services at:"
+            echo "📡 $NGROK_URL"
+          else
+            echo "❌ Could not retrieve ngrok URL. Check ngrok.log for details:"
+            cat ngrok.log || echo "No ngrok log available"
+          fi
 
       - name: 🔐 Start tmate session
         run: |
@@ -97,6 +112,7 @@ jobs:
           # Check and add directories that exist
           [ -d "/home/runner" ] && BACKUP_DIRS="$BACKUP_DIRS /home/runner"
           [ -f "./ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS ./ngrok"
+          [ -f "ngrok_url.txt" ] && BACKUP_DIRS="$BACKUP_DIRS ngrok_url.txt"
           
           echo "📦 Backing up: $BACKUP_DIRS"
           
@@ -120,11 +136,11 @@ jobs:
           git commit -m "📦 Full VPS backup including /home/runner" || echo "Nothing new to commit"
           git push origin main || echo "Push to GitHub failed"
 
-      - name: 📤 Save SSH link
+      - name: 📤 Save SSH link + ngrok URL
         continue-on-error: true
         run: |
-          git add links/*.txt || echo "No SSH links to add"
-          git commit -m "🔁 Updated SSH links" || echo "Nothing to commit"
+          git add links/*.txt ngrok_url.txt || echo "No files to add"
+          git commit -m "🔁 Updated SSH + ngrok URLs" || echo "Nothing to commit"
           git push origin main || echo "Push failed - continuing"
 
       - name: 🔁 Restart workflow automatically
