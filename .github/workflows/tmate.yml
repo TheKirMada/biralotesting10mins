@@ -77,9 +77,24 @@ jobs:
           echo ""
           echo "🔑 Connect to VPS via SSH:"
           echo "$SSH"
-          echo ""
-          echo "📁 INSTALL PUFFERPANEL IN: /home/runner/pufferpanel/"
-          echo "📁 This directory will be backed up!"
+
+      - name: 🚀 Auto-start PufferPanel from backup
+        run: |
+          if [ -d "/home/runner/pufferpanel/data" ]; then
+            echo "🚀 Starting PufferPanel from backup data..."
+            docker run -d \
+              -p 8080:8080 \
+              -v /home/runner/pufferpanel/data:/etc/pufferpanel \
+              -v /home/runner/pufferpanel/servers:/var/lib/pufferpanel \
+              --name pufferpanel \
+              pufferpanel/pufferpanel:latest
+            echo "✅ PufferPanel started automatically from backup"
+            echo "📁 Using data from: /home/runner/pufferpanel/"
+          else
+            echo "⚠️ No PufferPanel data found - manual installation required"
+            echo "📁 Install PufferPanel in: /home/runner/pufferpanel/"
+            echo "📁 This directory will be backed up for next time!"
+          fi
 
       - name: 🚀 Start Playit Tunnel
         run: |
