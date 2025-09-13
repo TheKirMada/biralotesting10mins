@@ -22,14 +22,21 @@ jobs:
       - name: 🛠️ Make backup script executable
         run: chmod +x backup-restore.sh
 
-      - name: 💾 Restore backup (from transfer.sh link)
-        continue-on-error: true
-        run: ./backup-restore.sh restore_backup
-
       - name: 🔧 Setup Git identity
         run: |
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
+
+      - name: 💾 Restore backup from GitHub
+        continue-on-error: true
+        run: |
+          echo "🔄 Checking for GitHub backup..."
+          if [ -f "vps_backup.tar.gz" ]; then
+            echo "✅ Found local backup, restoring..."
+            sudo tar -xzf vps_backup.tar.gz -C / 2>/dev/null || echo "Restore completed with warnings"
+          else
+            echo "⚠️ No local backup found - starting fresh"
+          fi
 
       - name: 🔧 Install and Setup ngrok
         run: |
@@ -41,21 +48,9 @@ jobs:
           ./ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
           echo "✅ ngrok installed and configured"
           
-          # Start ngrok tunnel in background and capture the public URL
+          # Start ngrok tunnel in background
           echo "🔄 Starting ngrok tunnel..."
           nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
-          
-          # Wait for ngrok to start and get the public URL
-          sleep 15
-          echo "🌐 Ngrok Public URL:"
-          NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
-          if [ -n "$NGROK_URL" ]; then
-            echo "✅ Public URL: $NGROK_URL"
-            echo "$NGROK_URL" > ngrok_url.txt
-          else
-            echo "❌ Could not retrieve ngrok URL. Check ngrok.log for details:"
-            cat ngrok.log || echo "No ngrok log available"
-          fi
 
       - name: 🔐 Start tmate session
         run: |
@@ -68,10 +63,8 @@ jobs:
           echo "🔑 Connect to VPS via SSH:"
           echo "$SSH"
           echo ""
-          echo "📁 INSTALL PUFFERPANEL IN THIS DIRECTORY:"
-          echo "/home/runner/pufferpanel/"
-          echo ""
-          echo "This directory will be automatically backed up!"
+          echo "📁 INSTALL PUFFERPANEL IN: /home/runner/pufferpanel/"
+          echo "📁 This directory will be backed up!"
 
       - name: 🚀 Start Playit Tunnel
         run: |
@@ -89,22 +82,21 @@ jobs:
             i=$((i+1))
           done
 
-      - name: 📦 COMPLETE Backup
+      - name: 📦 COMPLETE Backup (Includes /home/runner)
         timeout-minutes: 15
         run: |
-          echo "🚀 Creating COMPLETE backup..."
+          echo "🚀 Creating COMPLETE backup including /home/runner..."
           
           # Save package list
           mkdir -p backup_meta
           dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
           
-          # Build list of directories to backup
+          # Build list of directories to backup - NOW INCLUDES /home/runner
           BACKUP_DIRS="backup_meta"
           
-          # Check and add directories that exist (including your manually installed PufferPanel)
-          [ -d "/home/runner/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /home/runner/pufferpanel"
+          # Check and add directories that exist
+          [ -d "/home/runner" ] && BACKUP_DIRS="$BACKUP_DIRS /home/runner"
           [ -f "./ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS ./ngrok"
-          [ -f "ngrok_url.txt" ] && BACKUP_DIRS="$BACKUP_DIRS ngrok_url.txt"
           
           echo "📦 Backing up: $BACKUP_DIRS"
           
@@ -112,6 +104,7 @@ jobs:
           sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
           
           echo "✅ Backup created successfully (size: $(du -h vps_backup.tar.gz | cut -f1))"
+          echo "📁 INCLUDED: /home/runner/ (with your pufferpanel installation)"
 
       - name: 📤 Upload backup to GitHub
         continue-on-error: true
@@ -120,11 +113,11 @@ jobs:
           # Clean up unnecessary files
           rm -f ngrok-v3-stable-linux-amd64.tgz ngrok.log playit.log 2>/dev/null || true
           
-          # Add ALL files to git
+          # Add ALL files to git (including the backup)
           git add .
           
           # Commit and push
-          git commit -m "📦 Full VPS backup" || echo "Nothing new to commit"
+          git commit -m "📦 Full VPS backup including /home/runner" || echo "Nothing new to commit"
           git push origin main || echo "Push to GitHub failed"
 
       - name: 📤 Save SSH link
