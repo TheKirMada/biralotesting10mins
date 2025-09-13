@@ -26,33 +26,10 @@ jobs:
         continue-on-error: true
         run: ./backup-restore.sh restore_backup
 
-      - name: 🔧 Install PufferPanel
+      - name: 🔧 Setup Git identity
         run: |
-          echo "🚀 Installing PufferPanel..."
-          # Install Docker without sudo using official script
-          curl -fsSL https://get.docker.com -o get-docker.sh
-          sh get-docker.sh
-          
-          # Create PufferPanel data directory
-          mkdir -p /home/runner/pufferpanel/data
-          
-          # Run PufferPanel in Docker
-          docker run -d \
-            -p 8080:8080 \
-            -v /home/runner/pufferpanel/data:/etc/pufferpanel \
-            -v /home/runner/pufferpanel/servers:/var/lib/pufferpanel \
-            --name pufferpanel \
-            pufferpanel/pufferpanel:latest
-          
-          echo "✅ PufferPanel running on port 8080"
-          echo ""
-          echo "🎯 Manual Admin Setup Required:"
-          echo "==============================="
-          echo "1. Connect via tmate SSH (link will appear below)"
-          echo "2. Run this command to create admin user:"
-          echo "   docker run --rm pufferpanel/pufferpanel:latest pufferpanel user add --username \"YOUR_USERNAME\" --password \"YOUR_PASSWORD\" --email \"YOUR_EMAIL\" --admin"
-          echo "3. Replace YOUR_USERNAME, YOUR_PASSWORD, YOUR_EMAIL with your credentials"
-          echo "==============================="
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
 
       - name: 🔧 Install and Setup ngrok
         run: |
@@ -65,7 +42,7 @@ jobs:
           echo "✅ ngrok installed and configured"
           
           # Start ngrok tunnel in background and capture the public URL
-          echo "🔄 Starting ngrok tunnel on port 8080..."
+          echo "🔄 Starting ngrok tunnel..."
           nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
           
           # Wait for ngrok to start and get the public URL
@@ -91,8 +68,10 @@ jobs:
           echo "🔑 Connect to VPS via SSH:"
           echo "$SSH"
           echo ""
-          echo "💻 Once connected, run this command to create admin user:"
-          echo "docker run --rm pufferpanel/pufferpanel:latest pufferpanel user add --username \"YOUR_USERNAME\" --password \"YOUR_PASSWORD\" --email \"YOUR_EMAIL\" --admin"
+          echo "📁 INSTALL PUFFERPANEL IN THIS DIRECTORY:"
+          echo "/home/runner/pufferpanel/"
+          echo ""
+          echo "This directory will be automatically backed up!"
 
       - name: 🚀 Start Playit Tunnel
         run: |
@@ -110,74 +89,43 @@ jobs:
             i=$((i+1))
           done
 
-      - name: 📦 COMPLETE PufferPanel + ngrok backup
+      - name: 📦 COMPLETE Backup
         timeout-minutes: 15
         run: |
-          echo "🚀 Creating COMPLETE PufferPanel + ngrok backup..."
+          echo "🚀 Creating COMPLETE backup..."
           
-          # Save package list (if possible)
+          # Save package list
           mkdir -p backup_meta
-          command -v dpkg >/dev/null 2>&1 && dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
+          dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
           
-          # Build list of directories that ACTUALLY exist
+          # Build list of directories to backup
           BACKUP_DIRS="backup_meta"
           
-          # Check and add directories that exist
+          # Check and add directories that exist (including your manually installed PufferPanel)
           [ -d "/home/runner/pufferpanel" ] && BACKUP_DIRS="$BACKUP_DIRS /home/runner/pufferpanel"
           [ -f "./ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS ./ngrok"
           [ -f "ngrok_url.txt" ] && BACKUP_DIRS="$BACKUP_DIRS ngrok_url.txt"
           
           echo "📦 Backing up: $BACKUP_DIRS"
           
-          # Create backup of only existing files
-          if [ "$BACKUP_DIRS" != "backup_meta" ]; then
-            sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
-          else
-            echo "⚠️ No PufferPanel/ngrok files found, creating package list only"
-            tar -czf vps_backup.tar.gz backup_meta/ 2>/dev/null || true
-          fi
+          # Create backup
+          sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
           
           echo "✅ Backup created successfully (size: $(du -h vps_backup.tar.gz | cut -f1))"
 
-      - name: 📤 Upload backup to GitHub instead
+      - name: 📤 Upload backup to GitHub
         continue-on-error: true
         run: |
           echo "⬆️ Uploading backup to GitHub repository..."
-          # Clean up unnecessary files first
-          rm -f get-docker.sh ngrok-v3-stable-linux-amd64.tgz ngrok.log playit.log 2>/dev/null || true
+          # Clean up unnecessary files
+          rm -f ngrok-v3-stable-linux-amd64.tgz ngrok.log playit.log 2>/dev/null || true
           
-          # Add ALL files to git (including backup)
+          # Add ALL files to git
           git add .
           
-          # Commit with a specific message
-          git commit -m "📦 Full VPS backup including PufferPanel data" || echo "Nothing new to commit"
-          
-          # Push to GitHub
+          # Commit and push
+          git commit -m "📦 Full VPS backup" || echo "Nothing new to commit"
           git push origin main || echo "Push to GitHub failed"
-
-      - name: 📝 Create backup info file
-        run: |
-          echo "📋 Creating backup information file..."
-          cat > backup_info.txt << EOF
-          Backup created: $(date)
-          PufferPanel data: /home/runner/pufferpanel/
-          Ngrok URL: $(cat ngrok_url.txt 2>/dev/null || echo "Not available")
-          Backup size: $(du -h vps_backup.tar.gz 2>/dev/null | cut -f1 || echo "Unknown")
-          EOF
-          
-          git add backup_info.txt
-          git commit -m "📝 Added backup information" || echo "No new backup info"
-          git push origin main || echo "Push failed"
-
-      - name: 🔄 Pull latest changes with force
-        continue-on-error: true
-        run: |
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          # Force pull and overwrite local changes
-          git fetch origin main
-          git reset --hard origin/main
-          echo "✅ Force pulled latest changes"
 
       - name: 📤 Save SSH link
         continue-on-error: true
