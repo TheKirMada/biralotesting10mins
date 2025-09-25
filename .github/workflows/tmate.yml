@@ -1,5 +1,3 @@
-# Start of tmate.yml
-
 name: Create VPS (Auto-Restart & Safe)
 
 on:
@@ -10,7 +8,7 @@ on:
 jobs:
   start-vps:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 8 # <--- CHANGE 1: Set to 8 minutes for testing
     env:
       TMATE_SERVER: nyc1.tmate.io
 
@@ -147,11 +145,11 @@ jobs:
           nohup ./playit > playit.log 2>&1 &
           echo "✅ Playit started."
 
-      - name: ⏳ Keep VPS alive (15 min safe period)
+      - name: ⏳ Keep VPS alive (5 min test period) # <--- CHANGE 2A: Updated name
         run: |
           i=1
-          while [ $i -le 15 ]; do
-            echo "🟢 Running minute $i/15..."
+          while [ $i -le 5 ]; do # <--- CHANGE 2B: Changed 15 to 5 minutes
+            echo "🟢 Running minute $i/5..." # <--- CHANGE 2C: Updated message
             sleep 60
             i=$((i+1))
           done
@@ -219,5 +217,4 @@ jobs:
             https://api.github.com/repos/${{ github.repository }}/dispatches \
             -d '{"event_type": "create-vps", "client_payload": {"vps_name": "manual-vps", "backup": true}}' \
           || echo "Restart request failed"
-
-# End of tmate.yml
+```eof
