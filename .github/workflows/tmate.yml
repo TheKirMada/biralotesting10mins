@@ -1,1 +1,170 @@
+name: Create VPS (Auto-Restart & Safe)
 
+on:
+  workflow_dispatch:
+  repository_dispatch:
+    types: [create-vps]
+
+jobs:
+  start-vps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      TMATE_SERVER: nyc1.tmate.io
+
+    steps:
+      - name: ⬇️ Checkout
+        uses: actions/checkout@v3
+
+      - name: 📁 Prepare dirs
+        run: mkdir -p links .backup
+
+      - name: 🛠️ Make backup script executable
+        run: chmod +x backup-restore.sh
+
+      - name: 🔧 Setup Git identity
+        run: |
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+
+      - name: 💾 Restore backup from GitHub
+        continue-on-error: true
+        run: |
+          echo "🔄 Checking for GitHub backup..."
+          if [ -f "vps_backup.tar.gz" ]; then
+            echo "✅ Found local backup, restoring..."
+            sudo tar -xzf vps_backup.tar.gz -C / 2>/dev/null || echo "Restore completed with warnings"
+          else
+            echo "⚠️ No local backup found - starting fresh"
+          fi
+
+      - name: 🔧 Install and Setup ngrok
+        run: |
+          echo "🚀 Installing ngrok..."
+          # Download ngrok directly (no apt/sudo needed)
+          wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
+          tar -xzf ngrok-v3-stable-linux-amd64.tgz
+          chmod +x ngrok
+          ./ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
+          echo "✅ ngrok installed and configured"
+          
+          # Start ngrok tunnel in background and capture the public URL
+          echo "🔄 Starting ngrok tunnel on port 8080..."
+          nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
+          
+          # Wait for ngrok to start and get the public URL
+          sleep 15
+          echo "🌐 Ngrok Public URL:"
+          NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
+          if [ -n "$NGROK_URL" ]; then
+            echo "✅ Public URL: $NGROK_URL"
+            echo "$NGROK_URL" > ngrok_url.txt
+            echo ""
+            echo "🎯 Access your VPS services at:"
+            echo "📡 $NGROK_URL"
+          else
+            echo "❌ Could not retrieve ngrok URL. Check ngrok.log for details:"
+            cat ngrok.log || echo "No ngrok log available"
+          fi
+
+      - name: 🔐 Start tmate session
+        run: |
+          sudo apt update -y && sudo apt install -y tmate
+          tmate -S /tmp/tmate.sock new-session -d
+          tmate -S /tmp/tmate.sock wait tmate-ready
+          SSH=$(tmate -S /tmp/tmate.sock display -p '#{tmate_ssh}')
+          echo "$SSH" | tee "links/${{ github.event.client_payload.vps_name || 'manual-vps' }}.txt"
+          echo ""
+          echo "🔑 Connect to VPS via SSH:"
+          echo "$SSH"
+
+      - name: 🚀 Auto-start PufferPanel from backup
+        run: |
+          if [ -d "/home/runner/pufferpanel/data" ]; then
+            echo "🚀 Starting PufferPanel from backup data..."
+            docker run -d \
+              -p 8080:8080 \
+              -v /home/runner/pufferpanel/data:/etc/pufferpanel \
+              -v /home/runner/pufferpanel/servers:/var/lib/pufferpanel \
+              --name pufferpanel \
+              pufferpanel/pufferpanel:latest
+            echo "✅ PufferPanel started automatically from backup"
+            echo "📁 Using data from: /home/runner/pufferpanel/"
+          else
+            echo "⚠️ No PufferPanel data found - manual installation required"
+            echo "📁 Install PufferPanel in: /home/runner/pufferpanel/"
+            echo "📁 This directory will be backed up for next time!"
+          fi
+
+      - name: 🚀 Start Playit Tunnel
+        run: |
+          wget -q https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-linux-amd64 -O playit
+          chmod +x playit
+          nohup ./playit > playit.log 2>&1 &
+          echo "✅ Playit started."
+
+      - name: ⏳ Keep VPS alive (15 min safe period)
+        run: |
+          i=1
+          while [ $i -le 15 ]; do
+            echo "🟢 Running minute $i/15..."
+            sleep 60
+            i=$((i+1))
+          done
+
+      - name: 📦 COMPLETE Backup (Includes /home/runner)
+        timeout-minutes: 15
+        run: |
+          echo "🚀 Creating COMPLETE backup including /home/runner..."
+          
+          # Save package list
+          mkdir -p backup_meta
+          dpkg --get-selections > backup_meta/installed_packages.txt 2>/dev/null || true
+          
+          # Build list of directories to backup - NOW INCLUDES /home/runner
+          BACKUP_DIRS="backup_meta"
+          
+          # Check and add directories that exist
+          [ -d "/home/runner" ] && BACKUP_DIRS="$BACKUP_DIRS /home/runner"
+          [ -f "./ngrok" ] && BACKUP_DIRS="$BACKUP_DIRS ./ngrok"
+          [ -f "ngrok_url.txt" ] && BACKUP_DIRS="$BACKUP_DIRS ngrok_url.txt"
+          
+          echo "📦 Backing up: $BACKUP_DIRS"
+          
+          # Create backup
+          sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
+          
+          echo "✅ Backup created successfully (size: $(du -h vps_backup.tar.gz | cut -f1))"
+          echo "📁 INCLUDED: /home/runner/ (with your pufferpanel installation)"
+
+      - name: 📤 Upload backup to GitHub
+        continue-on-error: true
+        run: |
+          echo "⬆️ Uploading backup to GitHub repository..."
+          # Clean up unnecessary files
+          rm -f ngrok-v3-stable-linux-amd64.tgz ngrok.log playit.log 2>/dev/null || true
+          
+          # Add ALL files to git (including the backup)
+          git add .
+          
+          # Commit and push
+          git commit -m "📦 Full VPS backup including /home/runner" || echo "Nothing new to commit"
+          git push origin main || echo "Push to GitHub failed"
+
+      - name: 📤 Save SSH link + ngrok URL
+        continue-on-error: true
+        run: |
+          git add links/*.txt ngrok_url.txt || echo "No files to add"
+          git commit -m "🔁 Updated SSH + ngrok URLs" || echo "Nothing to commit"
+          git push origin main || echo "Push failed - continuing"
+
+      - name: 🔁 Restart workflow automatically
+        continue-on-error: true
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Content-Type: application/json" \
+            https://api.github.com/repos/${{ github.repository }}/dispatches \
+            -d '{"event_type": "create-vps", "client_payload": {"vps_name": "manual-vps", "backup": true}}' \
+          || echo "Restart request failed"
