@@ -1,3 +1,5 @@
+# Start of tmate.yml
+
 name: Create VPS (Auto-Restart & Safe)
 
 on:
@@ -17,8 +19,34 @@ jobs:
         uses: actions/checkout@v3
 
       - name: 📁 Prepare dirs
-        run: mkdir -p links .backup
+        run: |
+          mkdir -p links .backup /home/runner/pufferpanel/data
+          # Set a flag to check if PufferPanel data exists BEFORE restore
+          if [ ! -d "/home/runner/pufferpanel/data" ] || [ -z "$(ls -A /home/runner/pufferpanel/data)" ]; then
+            echo "PUFFERPANEL_FIRST_RUN=true" >> $GITHUB_ENV
+            echo "⚠️ First run detected for PufferPanel data directory."
+          else
+            echo "PUFFERPANEL_FIRST_RUN=false" >> $GITHUB_ENV
+            echo "✅ Existing PufferPanel data found."
+          fi
 
+      - name: 🐳 Install Docker (Required for PufferPanel)
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y ca-certificates curl gnupg lsb-release
+          sudo install -m 0755 -d /etc/apt/keyrings
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+          sudo chmod a+r /etc/apt/keyrings/docker.gpg
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          sudo apt-get update -y
+          sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          # Add current user (runner) to docker group to run without sudo
+          sudo usermod -aG docker $USER
+          echo "✅ Docker installed and configured"
+          
       - name: 🛠️ Make backup script executable
         run: chmod +x backup-restore.sh
 
@@ -32,12 +60,43 @@ jobs:
         run: |
           echo "🔄 Checking for GitHub backup..."
           if [ -f "vps_backup.tar.gz" ]; then
-            echo "✅ Found local backup, restoring..."
+            echo "✅ Found local backup, restoring to root (/) to restore PufferPanel data..."
+            # Restores /home/runner/pufferpanel/data and /home/runner/pufferpanel/servers
             sudo tar -xzf vps_backup.tar.gz -C / 2>/dev/null || echo "Restore completed with warnings"
+            echo "✅ PufferPanel data should now be restored to /home/runner/pufferpanel/"
           else
             echo "⚠️ No local backup found - starting fresh"
           fi
 
+      # --- NEW CRITICAL STEP: AUTOMATIC ADMIN USER CREATION ---
+      - name: 👨‍💻 Create PufferPanel Admin (If first run)
+        if: env.PUFFERPANEL_FIRST_RUN == 'true'
+        run: |
+          echo "Initial setup: Creating admin user 'kirmada'..."
+          # The user add command must be run only once during the initial setup
+          # It uses the mounted volume to write the new user data to the /home/runner/pufferpanel/data directory
+          docker run --rm \
+            -v /home/runner/pufferpanel/data:/etc/pufferpanel \
+            pufferpanel/pufferpanel:latest init \
+            --email "xblankx79@gmail.com" \
+            --password "kirmada2009" \
+            --username "kirmada" \
+            --admin
+          echo "✅ Admin user 'kirmada' created successfully."
+
+      - name: 🚀 Start PufferPanel container
+        run: |
+          echo "🚀 Starting PufferPanel container, bound to NGROK port 8080..."
+          # The main docker run command for persistence (if data exists, it simply starts the panel)
+          docker run -d \
+            -p 8080:8080 \
+            -v /home/runner/pufferpanel/data:/etc/pufferpanel \
+            -v /home/runner/pufferpanel/servers:/var/lib/pufferpanel \
+            --name pufferpanel \
+            --restart unless-stopped \
+            pufferpanel/pufferpanel:latest
+          echo "✅ PufferPanel container started. Will automatically restart on future runner runs."
+          
       - name: 🔧 Install and Setup ngrok
         run: |
           echo "🚀 Installing ngrok..."
@@ -45,22 +104,23 @@ jobs:
           wget -q https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-linux-amd64.tgz
           tar -xzf ngrok-v3-stable-linux-amd64.tgz
           chmod +x ngrok
+          # NOTE: Replace the token below with your actual ngrok token
           ./ngrok config add-authtoken 2YtAp6D68sZQGP19tb6ArNsUu0K_7DxzsfFA52dXeYr6gbEEz
           echo "✅ ngrok installed and configured"
           
           # Start ngrok tunnel in background and capture the public URL
           echo "🔄 Starting ngrok tunnel on port 8080..."
-          nohup ./ngrok http http://localhost:8080 > ngrok.log 2>&1 &
+          nohup ./ngrok http 8080 > ngrok.log 2>&1 &
           
           # Wait for ngrok to start and get the public URL
           sleep 15
           echo "🌐 Ngrok Public URL:"
           NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"[^"]*"' | head -1 | cut -d'"' -f4)
           if [ -n "$NGROK_URL" ]; then
-            echo "✅ Public URL: $NGROK_URL"
+            echo "✅ Public URL for PufferPanel: $NGROK_URL"
             echo "$NGROK_URL" > ngrok_url.txt
             echo ""
-            echo "🎯 Access your VPS services at:"
+            echo "🎯 Access your PufferPanel via HTTPS (Port 8080) at:"
             echo "📡 $NGROK_URL"
           else
             echo "❌ Could not retrieve ngrok URL. Check ngrok.log for details:"
@@ -78,26 +138,10 @@ jobs:
           echo "🔑 Connect to VPS via SSH:"
           echo "$SSH"
 
-      - name: 🚀 Auto-start PufferPanel from backup
-        run: |
-          if [ -d "/home/runner/pufferpanel/data" ]; then
-            echo "🚀 Starting PufferPanel from backup data..."
-            docker run -d \
-              -p 8080:8080 \
-              -v /home/runner/pufferpanel/data:/etc/pufferpanel \
-              -v /home/runner/pufferpanel/servers:/var/lib/pufferpanel \
-              --name pufferpanel \
-              pufferpanel/pufferpanel:latest
-            echo "✅ PufferPanel started automatically from backup"
-            echo "📁 Using data from: /home/runner/pufferpanel/"
-          else
-            echo "⚠️ No PufferPanel data found - manual installation required"
-            echo "📁 Install PufferPanel in: /home/runner/pufferpanel/"
-            echo "📁 This directory will be backed up for next time!"
-          fi
-
       - name: 🚀 Start Playit Tunnel
         run: |
+          # Ensure current user can read/execute the playit executable if it was restored.
+          chmod +x playit 2>/dev/null || true
           wget -q https://github.com/playit-cloud/playit-agent/releases/latest/download/playit-linux-amd64 -O playit
           chmod +x playit
           nohup ./playit > playit.log 2>&1 &
@@ -131,11 +175,11 @@ jobs:
           
           echo "📦 Backing up: $BACKUP_DIRS"
           
-          # Create backup
+          # Create backup (must run with sudo as /home/runner/pufferpanel/data might have root-owned files from docker)
           sudo tar -czf vps_backup.tar.gz $BACKUP_DIRS 2>/dev/null || true
           
           echo "✅ Backup created successfully (size: $(du -h vps_backup.tar.gz | cut -f1))"
-          echo "📁 INCLUDED: /home/runner/ (with your pufferpanel installation)"
+          echo "📁 INCLUDED: /home/runner/ (with your pufferpanel installation and admin user data)"
 
       - name: 📤 Upload backup to GitHub
         continue-on-error: true
@@ -149,14 +193,21 @@ jobs:
           
           # Commit and push
           git commit -m "📦 Full VPS backup including /home/runner" || echo "Nothing new to commit"
-          git push origin main || echo "Push to GitHub failed"
+          # Use a loop to retry push as it might fail if the remote branch changed after the checkout step
+          for i in 1 2 3; do
+            if git push origin main; then
+              echo "✅ Push successful on attempt $i"
+              break
+            fi
+            sleep 5
+            git pull origin main --rebase || true # Pull changes before retrying
+          done
 
       - name: 📤 Save SSH link + ngrok URL
         continue-on-error: true
         run: |
           git add links/*.txt ngrok_url.txt || echo "No files to add"
           git commit -m "🔁 Updated SSH + ngrok URLs" || echo "Nothing to commit"
-          git push origin main || echo "Push failed - continuing"
 
       - name: 🔁 Restart workflow automatically
         continue-on-error: true
@@ -168,3 +219,5 @@ jobs:
             https://api.github.com/repos/${{ github.repository }}/dispatches \
             -d '{"event_type": "create-vps", "client_payload": {"vps_name": "manual-vps", "backup": true}}' \
           || echo "Restart request failed"
+
+# End of tmate.yml
